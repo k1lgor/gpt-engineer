@@ -246,7 +246,7 @@ def execute_entrypoint(ai: AI, dbs: DBs) -> List[dict]:
     print("You can press ctrl+c *once* to stop the execution.")
     print()
 
-    p = subprocess.Popen("bash run.sh", shell=True, cwd=dbs.workspace.path)
+    p = subprocess.Popen("bash run.sh", shell=False, cwd=dbs.workspace.path)
     try:
         p.wait()
     except KeyboardInterrupt:
