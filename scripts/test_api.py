@@ -22,7 +22,7 @@ def post_data(url, extra_arguments):
         The response from the server.
     """
 
-    response = requests.post(url, json=extra_arguments)
+    response = requests.post(url, json=extra_arguments, timeout=60)
     return response
 
 
