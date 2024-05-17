@@ -20,6 +20,7 @@ __name__ : str
     The standard boilerplate for invoking the main function when the script is executed.
 """
 import importlib
+import os.path
 
 from typing import Annotated, Optional
 
@@ -28,8 +29,12 @@ import typer
 from langchain.cache import SQLiteCache
 from langchain.globals import set_llm_cache
 
+from gpt_engineer.applications.cli.main import load_env_if_needed
+from gpt_engineer.benchmark.bench_config import BenchConfig
 from gpt_engineer.benchmark.benchmarks.load import get_benchmark
-from gpt_engineer.benchmark.run import print_results, run
+from gpt_engineer.benchmark.run import export_yaml_results, print_results, run
+
+app = typer.Typer()  # creates a CLI app
 
 
 def get_agent(path):
@@ -51,6 +56,14 @@ def get_agent(path):
     return agent_module.default_config_agent()
 
 
+@app.command(
+    help="""
+        Run any benchmark(s) against the specified agent.
+
+        \b
+        Currently available benchmarks are: apps and mbpp
+    """
+)
 def main(
     path_to_agent: Annotated[
         str,
@@ -58,11 +71,12 @@ def main(
             help="python file that contains a function called 'default_config_agent'"
         ),
     ],
-    benchmarks: Annotated[
-        str, typer.Argument(help="benchmark name(s) separated by ','")
-    ],
-    task_name: Annotated[
-        Optional[str], typer.Argument(help="optional task name in benchmark")
+    bench_config: Annotated[
+        str, typer.Argument(help="optional task name in benchmark")
+    ] = os.path.join(os.path.dirname(__file__), "default_bench_config.toml"),
+    yaml_output: Annotated[
+        Optional[str],
+        typer.Option(help="print results for each task", show_default=False),
     ] = None,
     verbose: Annotated[
         bool, typer.Option(help="print results for each task", show_default=False)
@@ -75,30 +89,50 @@ def main(
     ----------
     path_to_agent : str
         The file path to the Python module that contains a function called 'default_config_agent'.
-    benchmarks : str
-        A comma-separated string of benchmark names to run.
-    task_name : Optional[str], default=None
-        An optional task name to run within the benchmark.
+    bench_config : str, default=default_bench_config.toml
+        Configuration file for choosing which benchmark problems to run. See default config for more details.
+    yaml_output: Optional[str], default=None
+        Pass a path to a yaml file to have results written to file.
     verbose : bool, default=False
         A flag to indicate whether to print results for each task.
-
     Returns
     -------
     None
     """
     set_llm_cache(SQLiteCache(database_path=".langchain.db"))
+    load_env_if_needed()
+    config = BenchConfig.from_toml(bench_config)
+    print("using config file: " + bench_config)
+    benchmarks = list()
+    benchmark_results = dict()
+    for specific_config_name in vars(config):
+        specific_config = getattr(config, specific_config_name)
+        if hasattr(specific_config, "active"):
+            if specific_config.active:
+                benchmarks.append(specific_config_name)
 
-    benchmarks = benchmarks.split(",")
     for benchmark_name in benchmarks:
-        benchmark = get_benchmark(benchmark_name)
+        benchmark = get_benchmark(benchmark_name, config)
+        if len(benchmark.tasks) == 0:
+            print(
+                benchmark_name
+                + " was skipped, since no tasks are specified. Increase the number of tasks in the config file at: "
+                + bench_config
+            )
+            continue
         agent = get_agent(path_to_agent)
 
-        results = run(agent, benchmark, task_name, verbose=verbose)
+        results = run(agent, benchmark, verbose=verbose)
         print(
             f"\n--- Results for agent {path_to_agent}, benchmark: {benchmark_name} ---"
         )
         print_results(results)
         print()
+        benchmark_results[benchmark_name] = {
+            "detailed": [result.to_dict() for result in results]
+        }
+    if yaml_output is not None:
+        export_yaml_results(yaml_output, benchmark_results, config.to_dict())
 
 
 if __name__ == "__main__":

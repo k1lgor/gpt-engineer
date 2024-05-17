@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Union
 
 from gpt_engineer.core.files_dict import FilesDict
+from gpt_engineer.core.linting import Linting
 
 
 class FileStore:
@@ -35,7 +36,7 @@ class FileStore:
         self.working_dir.mkdir(parents=True, exist_ok=True)
         self.id = self.working_dir.name.split("-")[-1]
 
-    def upload(self, files: FilesDict):
+    def push(self, files: FilesDict):
         for name, content in files.items():
             path = self.working_dir / name
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -43,7 +44,12 @@ class FileStore:
                 f.write(content)
         return self
 
-    def download(self) -> FilesDict:
+    def linting(self, files: FilesDict) -> FilesDict:
+        # lint the code
+        linting = Linting()
+        return linting.lint_files(files)
+
+    def pull(self) -> FilesDict:
         files = {}
         for path in self.working_dir.glob("**/*"):
             if path.is_file():

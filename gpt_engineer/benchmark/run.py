@@ -14,7 +14,9 @@ print_results : function
 """
 import time
 
-from typing import List, Optional
+from typing import List
+
+import yaml
 
 from gpt_engineer.benchmark.types import Assertable, Benchmark, TaskResult
 from gpt_engineer.core.base_agent import BaseAgent
@@ -24,7 +26,6 @@ from gpt_engineer.core.default.disk_execution_env import DiskExecutionEnv
 def run(
     agent: BaseAgent,
     benchmark: Benchmark,
-    task_name: Optional[str] = None,
     verbose=False,
 ) -> List[TaskResult]:
     """
@@ -36,8 +37,6 @@ def run(
         The agent to use for running the benchmark tasks.
     benchmark : Benchmark
         The benchmark containing the tasks to run.
-    task_name : Optional[str], default=None
-        An optional name of a specific task to run within the benchmark.
     verbose : bool, default=False
         A flag to indicate whether to print verbose output during the benchmark.
 
@@ -48,8 +47,10 @@ def run(
     """
     task_results = []
     for task in benchmark.tasks:
+        print(f"--> Running task: {task.name}\n")
+
         t0 = time.time()
-        files_dict = agent.improve(task.initial_code, task.prompt, task.command)
+        files_dict = agent.improve(task.initial_code, task.prompt)
         t1 = time.time()
 
         env = DiskExecutionEnv()
@@ -61,6 +62,7 @@ def run(
             stdout, stderr = stdout.decode("utf-8"), stderr.decode("utf-8")
         else:
             p, stdout, stderr = None, None, None
+
         exec_result = Assertable(
             files=files_dict,
             env=env,
@@ -79,6 +81,7 @@ def run(
                 duration=t1 - t0,
             )
         )
+
         if verbose:
             print_results(task_results)
     return task_results
@@ -105,8 +108,10 @@ def print_results(results: list[TaskResult]):
             print(f"  {checkmark} {assertion_name}")
         print()
 
+    success_rates = [task_result.success_rate for task_result in results]
+    avg_success_rate = sum(success_rates) / len(results)
+
     total_time = sum(task_result.duration for task_result in results)
-    print(f"Total time: {total_time:.2f}s")
 
     correct_assertions = sum(
         sum(
@@ -118,14 +123,28 @@ def print_results(results: list[TaskResult]):
     total_assertions = sum(
         len(task_result.assertion_results) for task_result in results
     )
-    print(f"Total correct assertions: {correct_assertions}/{total_assertions}")
+    correct_tasks = [
+        task_result for task_result in results if task_result.success_rate == 1
+    ]
 
-    correct_tasks = sum(
-        all(
-            assertion_result
-            for assertion_result in task_result.assertion_results.values()
-        )
-        for task_result in results
-    )
-    print(f"Correct tasks: {correct_tasks}/{len(results)}")
+    print("--- Results ---")
+    print(f"Total time: {total_time:.2f}s")
+    print(f"Completely correct tasks: {len(correct_tasks)}/{len(results)}")
+    print(f"Total correct assertions: {correct_assertions}/{total_assertions}")
+    print(f"Average success rate: {avg_success_rate * 100}% on {len(results)} tasks")
+    print("--- Results ---")
     print()
+
+
+def export_yaml_results(yaml_path, complete_results, config):
+    for results in complete_results.values():
+        correct_tasks = [
+            task_result
+            for task_result in results["detailed"]
+            if task_result["solved"] == 1.0
+        ]
+        fraction_correct = len(correct_tasks) / len(results["detailed"])
+        results["fully_solved"] = fraction_correct
+    complete_results["config"] = config
+    with open(yaml_path, "w") as f:
+        yaml.dump(complete_results, f, indent=4)

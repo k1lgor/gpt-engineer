@@ -10,11 +10,13 @@ Functions
 load_gptme : function
     Loads the GPT-Me benchmark, which consists of a series of tasks for evaluation.
 """
+from gpt_engineer.benchmark.bench_config import GptmeConfig
 from gpt_engineer.benchmark.types import Benchmark, Task
 from gpt_engineer.core.files_dict import FilesDict
+from gpt_engineer.core.prompt import Prompt
 
 
-def load_gptme():
+def load_gptme(config: GptmeConfig) -> Benchmark:
     """
     Loads the GPT-Me benchmark, which consists of a series of tasks for evaluation.
 
@@ -30,7 +32,7 @@ def load_gptme():
                 name="hello",
                 initial_code=FilesDict({"hello.py": "print('Hello, world!')"}),
                 command="python hello.py",
-                prompt="Change the code in hello.py to print 'Hello, human!'",
+                prompt=Prompt("Change the code in hello.py to print 'Hello, human!'"),
                 assertions={
                     "correct output": lambda assertable: assertable.stdout
                     == "Hello, human!\n",
@@ -44,7 +46,7 @@ def load_gptme():
                 name="hello-patch",
                 initial_code=FilesDict({"hello.py": "print('Hello, world!')"}),
                 command="python hello.py",
-                prompt="Patch the code in hello.py to print 'Hello, human!'",
+                prompt=Prompt("Patch the code in hello.py to print 'Hello, human!'"),
                 assertions={
                     "correct output": lambda assertable: assertable.stdout
                     == "Hello, human!\n",
@@ -58,7 +60,9 @@ def load_gptme():
                 name="hello-ask",
                 initial_code=FilesDict({"hello.py": "print('Hello, world!')"}),
                 command="echo 'Erik' | python hello.py",
-                prompt="modify hello.py to ask the user for their name and print 'Hello, <name>!'. don't try to execute it",
+                prompt=Prompt(
+                    "modify hello.py to ask the user for their name and print 'Hello, <name>!'. don't try to execute it"
+                ),
                 assertions={
                     "correct output": lambda assertable: "Hello, Erik!"
                     in assertable.stdout,
@@ -70,7 +74,9 @@ def load_gptme():
                     {}
                 ),  # Empty dictionary since no initial code is provided
                 command="python prime.py",
-                prompt="write a script prime.py that computes and prints the 100th prime number",
+                prompt=Prompt(
+                    "write a script prime.py that computes and prints the 100th prime number"
+                ),
                 assertions={
                     "correct output": lambda assertable: "541"
                     in assertable.stdout.split(),
@@ -82,7 +88,9 @@ def load_gptme():
                     {}
                 ),  # Empty dictionary since no initial code is provided
                 command="git status",
-                prompt="initialize a git repository, write a main.py file, and commit it",
+                prompt=Prompt(
+                    "initialize a git repository, write a main.py file, and commit it"
+                ),
                 assertions={
                     "clean exit": lambda assertable: assertable.process.returncode == 0,
                     "clean working tree": lambda assertable: "nothing to commit, working tree clean"

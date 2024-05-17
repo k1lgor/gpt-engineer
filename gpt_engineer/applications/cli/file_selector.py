@@ -17,17 +17,20 @@ It operates within the GPT-Engineer environment, relying on core functionalities
 file handling and persistence.
 """
 
+import fnmatch
 import os
 import subprocess
 
 from pathlib import Path
-from typing import Any, Dict, List, Union
+from typing import Any, Dict, Generator, List, Union
 
 import toml
 
 from gpt_engineer.core.default.disk_memory import DiskMemory
+from gpt_engineer.core.default.file_store import FileStore
 from gpt_engineer.core.default.paths import metadata_path
 from gpt_engineer.core.files_dict import FilesDict
+from gpt_engineer.core.git import filter_by_gitignore, is_git_repo
 
 
 class FileSelector:
@@ -51,11 +54,15 @@ class FileSelector:
     IGNORE_FOLDERS = {"site-packages", "node_modules", "venv", "__pycache__"}
     FILE_LIST_NAME = "file_selection.toml"
     COMMENT = (
-        "# Remove '#' to select a file.\n\n"
+        "# Remove '#' to select a file or turn off linting.\n\n"
+        "# Linting with BLACK (Python) enhances code suggestions from LLMs. "
+        "To disable linting, uncomment the relevant option in the linting settings.\n\n"
         "# gpt-engineer can only read selected files. "
         "Including irrelevant files will degrade performance, "
         "cost additional tokens and potentially overflow token limit.\n\n"
     )
+    LINTING_STRING = '[linting]\n# "linting" = "off"\n\n'
+    isLinting = True
 
     def __init__(self, project_path: Union[str, Path]):
         """
@@ -102,10 +109,21 @@ class FileSelector:
             # selected files contains paths that are relative to the project path
             try:
                 # to open the file we need the path from the cwd
-                with open(Path(self.project_path) / file_path, "r") as content:
+                with open(
+                    Path(self.project_path) / file_path, "r", encoding="utf-8"
+                ) as content:
                     content_dict[str(file_path)] = content.read()
             except FileNotFoundError:
                 print(f"Warning: File not found {file_path}")
+            except UnicodeDecodeError:
+                print(f"Warning: File not UTF-8 encoded {file_path}, skipping")
+
+        if self.isLinting:
+            file_store = FileStore()
+            files = FilesDict(content_dict)
+            linted_files = file_store.linting(files)
+            return linted_files
+
         return FilesDict(content_dict)
 
     def editor_file_selector(
@@ -148,12 +166,24 @@ class FileSelector:
             # Write to the toml file
             with open(toml_file, "w") as f:
                 f.write(self.COMMENT)
+                f.write(self.LINTING_STRING)
                 f.write(s)
 
         else:
             # Load existing files from the .toml configuration
             all_files = self.get_current_files(root_path)
             s = toml.dumps({"files": {x: "selected" for x in all_files}})
+
+            # get linting status from the toml file
+            with open(toml_file, "r") as file:
+                linting_status = toml.load(file)
+            if (
+                "linting" in linting_status
+                and linting_status["linting"].get("linting", "").lower() == "off"
+            ):
+                self.isLinting = False
+                self.LINTING_STRING = '[linting]\n"linting" = "off"\n\n'
+                print("\nLinting is disabled")
 
             with open(toml_file, "r") as file:
                 selected_files = toml.load(file)
@@ -172,6 +202,7 @@ class FileSelector:
             # Write the merged list back to the .toml for user review and modification
             with open(toml_file, "w") as file:
                 file.write(self.COMMENT)  # Ensure to write the comment
+                file.write(self.LINTING_STRING)
                 file.write(s)
 
         print(
@@ -269,6 +300,16 @@ class FileSelector:
         selected_files = []
         edited_tree = toml.load(toml_file)  # Load the edited .toml file
 
+        # check if users have disabled linting or not
+        if (
+            "linting" in edited_tree
+            and edited_tree["linting"].get("linting", "").lower() == "off"
+        ):
+            self.isLinting = False
+            print("\nLinting is disabled")
+        else:
+            self.isLinting = True
+
         # Iterate through the files in the .toml and append selected files to the list
         for file, _ in edited_tree["files"].items():
             selected_files.append(file)
@@ -282,14 +323,22 @@ class FileSelector:
         print(f"\nYou have selected the following files:\n{input_path}")
 
         project_path = Path(input_path).resolve()
-        all_paths = set(
+        selected_paths = set(
             project_path.joinpath(file).resolve(strict=False) for file in selected_files
         )
 
+        for displayable_path in DisplayablePath.make_tree(project_path):
+            if displayable_path.path in selected_paths:
+                p = displayable_path
+                while p.parent and p.parent.path not in selected_paths:
+                    selected_paths.add(p.parent.path)
+                    p = p.parent
+
         try:
             for displayable_path in DisplayablePath.make_tree(project_path):
-                if displayable_path.path in all_paths:
+                if displayable_path.path in selected_paths:
                     print(displayable_path.displayable())
+
         except FileNotFoundError:
             print("Specified path does not exist: ", project_path)
         except Exception as e:
@@ -324,9 +373,18 @@ class FileSelector:
 
         return existing_files
 
+    def should_filter_file(self, file_path: Path, filters: List[str]) -> bool:
+        """
+        Determines if a file should be ignored based on .gitignore rules.
+        """
+        for f in filters:
+            if fnmatch.fnmatchcase(str(file_path), f):
+                return True
+        return False
+
     def get_current_files(self, project_path: Union[str, Path]) -> List[str]:
         """
-        Generates a list of all files in the project directory.
+        Generates a list of all files in the project directory. Will use .gitignore files if project_path is a git repository.
 
         Parameters
         ----------
@@ -343,37 +401,25 @@ class FileSelector:
             project_path
         ).resolve()  # Ensure path is absolute and resolved
 
-        for path in project_path.glob("**/*"):  # Recursively list all files
+        file_list = project_path.glob("**/*")
+
+        for path in file_list:  # Recursively list all files
             if path.is_file():
                 relpath = path.relative_to(project_path)
-
                 parts = relpath.parts
                 if any(part.startswith(".") for part in parts):
-                    continue  # Skip hidden fileso
+                    continue  # Skip hidden files
                 if any(part in self.IGNORE_FOLDERS for part in parts):
                     continue
+                if relpath.name == "prompt":
+                    continue  # Skip files named 'prompt'
 
                 all_files.append(str(relpath))
 
+        if is_git_repo(project_path) and "projects" not in project_path.parts:
+            all_files = filter_by_gitignore(project_path, all_files)
+
         return all_files
-
-    def is_in_ignoring_extensions(self, path: Path) -> bool:
-        """
-        Checks if a file path should be ignored based on predefined criteria.
-
-        Parameters
-        ----------
-        path : Path
-            The path to the file to be checked.
-
-        Returns
-        -------
-        bool
-            True if the file should not be ignored, False otherwise.
-        """
-        is_hidden = not path.name.startswith(".")
-        is_pycache = "__pycache__" not in path.name
-        return is_hidden and is_pycache
 
 
 class DisplayablePath(object):
@@ -423,7 +469,7 @@ class DisplayablePath(object):
     @classmethod
     def make_tree(
         cls, root: Union[str, Path], parent=None, is_last=False, criteria=None
-    ):
+    ) -> Generator["DisplayablePath", None, None]:
         """
         Creates a tree of DisplayablePath objects from a root directory.
 

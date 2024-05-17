@@ -1,6 +1,7 @@
 """
 Tests for successful installation of the package.
 """
+
 import shutil
 import subprocess
 import sys
@@ -84,13 +85,16 @@ def test_cli_execution():
     ), f"gpt-engineer command failed with message: {result.stderr}"
 
 
-def test_installed_main_execution(tmp_path):
+@pytest.mark.requires_key
+def test_installed_main_execution(tmp_path, monkeypatch):
+    # Ignore git installation check
+    monkeypatch.setattr("gpt_engineer.core.git.is_git_installed", lambda: False)
     tmp_path = Path(tmp_path)
     p = tmp_path / "projects/example"
     p.mkdir(parents=True)
     (p / "prompt").write_text("make a program that prints the outcome of 4+4")
     proc = subprocess.Popen(
-        ["gpte_test_application", str(p)],
+        ["gpte", str(p)],
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         text=True,
