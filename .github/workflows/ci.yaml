@@ -1,4 +1,4 @@
-name: Tox pytest all python versions
+name: nox pytest all python versions
 
 on:
   push:
@@ -22,16 +22,16 @@ jobs:
         python-version: ["3.10", "3.11", "3.12"]
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v3
 
       - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v4
         with:
           python-version: ${{ matrix.python-version }}
-          cache: "pip" #Note that pip is for the tox level. Poetry is still used for installing the specific environments (tox.ini)
+          cache: "pip" #Note that pip is for the nox level. Poetry is still used for installing the specific environments (nox.ini)
 
-      - name: Install tox
-        run: pip install tox==4.15.0
+      - name: Install nox
+        run: pip install nox==2024.4.15
 
       - name: Run nox
         env:
