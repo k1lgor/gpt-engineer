@@ -1,13 +1,13 @@
-name: Tox pytest all python versions
+name: nox pytest all python versions
 
 on:
   push:
-    branches: [ main ]
+    branches: [main]
     paths:
       - gpt_engineer/**
       - tests/**
   pull_request:
-    branches: [ main ]
+    branches: [main]
 
 concurrency:
   group: ${{github.workflow}} - ${{github.ref}}
@@ -19,25 +19,25 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python-version: ['3.10', '3.11', '3.12']
+        python-version: ["3.10", "3.11", "3.12"]
 
     steps:
-    - uses: actions/checkout@v3
+      - uses: actions/checkout@v3
 
-    - name: Set up Python ${{ matrix.python-version }}
-      uses: actions/setup-python@v4
-      with:
-        python-version: ${{ matrix.python-version }}
-        cache: 'pip' #Note that pip is for the tox level. Poetry is still used for installing the specific environments (tox.ini)
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: "pip" #Note that pip is for the nox level. Poetry is still used for installing the specific environments (nox.ini)
 
-    - name: Install tox
-      run: pip install tox==4.15.0
+      - name: Install nox
+        run: pip install nox==2024.4.15
 
-    - name: Run tox
-      env:
-        OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-      run: tox
+      - name: Run nox
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: nox
 
-    - name: Report coverage
-      run: |
-        bash <(curl -s https://codecov.io/bash)
+      - name: Report coverage
+        run: |
+          bash <(curl -s https://codecov.io/bash)
